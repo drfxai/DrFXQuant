@@ -679,10 +679,10 @@ function openLiveTrading(){
       if(!localStream)return;
       const pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}]});
       localStream.getTracks().forEach(tr=>pc.addTrack(tr,localStream));
-      pc.onicecandidate=e=>{if(e.candidate)S.socket.emit("live_signal",{to:data.socketId,signal:{type:"candidate",candidate:e.candidate}});};
+      pc.onicecandidate=e=>{if(e.candidate)S.socket.emit("live_signal",{to:data.socketId,signal:{type:"candidate",candidate:e.candidate.toJSON()}});};
       pc.createOffer().then(offer=>pc.setLocalDescription(offer)).then(()=>{
-        S.socket.emit("live_signal",{to:data.socketId,signal:{type:"offer",sdp:pc.localDescription}});
-      });
+        S.socket.emit("live_signal",{to:data.socketId,signal:{type:"offer",sdp:pc.localDescription.sdp,sdpType:pc.localDescription.type}});
+      }).catch(e=>console.error("Offer error:",e));
       // Store by viewer socket for answer handling
       if(!window._livePeers)window._livePeers={};
       window._livePeers[data.socketId]=pc;
@@ -690,8 +690,8 @@ function openLiveTrading(){
     S.socket.on("live_signal",(data)=>{
       const pc=window._livePeers?.[data.from];
       if(!pc)return;
-      if(data.signal.type==="answer")pc.setRemoteDescription(new RTCSessionDescription(data.signal.sdp||data.signal));
-      else if(data.signal.type==="candidate"&&data.signal.candidate)pc.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
+      if(data.signal.type==="answer")pc.setRemoteDescription({type:data.signal.sdpType||"answer",sdp:data.signal.sdp}).catch(e=>console.error("Admin SRD:",e));
+      else if(data.signal.type==="candidate"&&data.signal.candidate)pc.addIceCandidate(data.signal.candidate).catch(e=>console.error("Admin ICE:",e));
     });
     function stopStream(){
       if(localStream){localStream.getTracks().forEach(tr=>tr.stop());localStream=null;}
@@ -721,34 +721,80 @@ function openLiveTrading(){
     </div>
     <div id="live-user-stream" style="display:none;flex:1;flex-direction:column;overflow:hidden">
       <div style="flex:1;position:relative;background:#000;overflow:hidden">
-        <video id="live-video" autoplay playsinline style="width:100%;height:100%;object-fit:contain"></video>
+        <video id="live-video" muted playsinline webkit-playsinline style="width:100%;height:100%;object-fit:contain"></video>
         <div style="position:absolute;top:12px;left:12px;display:flex;gap:8px">
           <div style="padding:4px 12px;border-radius:8px;background:rgba(239,68,68,.9);color:#fff;font-size:12px;font-weight:700;animation:bk 1.2s infinite;backdrop-filter:blur(10px)">● LIVE</div>
           <div id="live-user-name" style="padding:4px 12px;border-radius:8px;background:rgba(0,0,0,.6);color:#fff;font-size:12px;font-weight:600;backdrop-filter:blur(10px)"></div>
         </div>
+        <button id="live-unmute-btn" style="display:none;position:absolute;bottom:16px;left:50%;transform:translateX(-50%);padding:10px 24px;border-radius:12px;border:none;background:rgba(255,255,255,.15);backdrop-filter:blur(10px);color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:'Outfit',sans-serif">🔇 Tap to Unmute</button>
       </div>
     </div>`;
+    let iceCandidateQueue=[];
+    let remoteDescSet=false;
     S.socket.on("live_signal",(data)=>{
       if(data.signal.type==="offer"){
-        if(peerConn)peerConn.close();
-        peerConn=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}]});
-        peerConn.onicecandidate=e=>{if(e.candidate)S.socket.emit("live_signal",{to:data.from,signal:{type:"candidate",candidate:e.candidate}});};
-        peerConn.ontrack=e=>{
-          const v=ov.querySelector("#live-video");if(v)v.srcObject=e.streams[0];
+        if(peerConn){try{peerConn.close();}catch(e){}}
+        peerConn=null;iceCandidateQueue=[];remoteDescSet=false;
+        const pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"},{urls:"stun:stun2.l.google.com:19302"}]});
+        peerConn=pc;
+        pc.onicecandidate=e=>{if(e.candidate)S.socket.emit("live_signal",{to:data.from,signal:{type:"candidate",candidate:e.candidate.toJSON()}});};
+        pc.ontrack=e=>{
+          // 1) Show container FIRST so video element is in layout
           ov.querySelector("#live-user-idle").style.display="none";
           const sd=ov.querySelector("#live-user-stream");sd.style.display="flex";
+          // 2) Set srcObject after container is visible
+          const v=ov.querySelector("#live-video");
+          if(v&&e.streams&&e.streams[0]){
+            v.srcObject=e.streams[0];
+            v.playsInline=true;
+            v.muted=true;
+            // 3) Explicit play() — start muted (guaranteed by browser policy), then show unmute button
+            const tryPlay=()=>{
+              v.play().then(()=>{
+                // Started muted OK, show unmute button
+                const ub=ov.querySelector("#live-unmute-btn");
+                if(ub){ub.style.display="block";ub.onclick=()=>{v.muted=false;ub.style.display="none";};}
+              }).catch(()=>{
+                // Even muted play failed, retry after short delay
+                setTimeout(tryPlay,500);
+              });
+            };
+            // Small delay to let layout settle on mobile
+            setTimeout(tryPlay,100);
+          }
         };
-        peerConn.setRemoteDescription(new RTCSessionDescription(data.signal.sdp||data.signal))
-          .then(()=>peerConn.createAnswer())
-          .then(ans=>peerConn.setLocalDescription(ans))
-          .then(()=>{S.socket.emit("live_signal",{to:data.from,signal:{type:"answer",sdp:peerConn.localDescription}});});
-      }else if(data.signal.type==="candidate"&&data.signal.candidate&&peerConn){
-        peerConn.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
+        pc.onconnectionstatechange=()=>{
+          if(pc.connectionState==="failed"){
+            console.log("WebRTC connection failed, retrying...");
+            S.socket.emit("live_join");
+          }
+        };
+        // Set remote description, then flush queued ICE candidates
+        pc.setRemoteDescription({type:data.signal.sdpType||"offer",sdp:data.signal.sdp})
+          .then(()=>{
+            remoteDescSet=true;
+            // Flush queued candidates
+            iceCandidateQueue.forEach(c=>pc.addIceCandidate(c).catch(()=>{}));
+            iceCandidateQueue=[];
+            return pc.createAnswer();
+          })
+          .then(ans=>pc.setLocalDescription(ans))
+          .then(()=>{
+            S.socket.emit("live_signal",{to:data.from,signal:{type:"answer",sdp:pc.localDescription.sdp,sdpType:pc.localDescription.type}});
+          }).catch(e=>console.error("Viewer SDP error:",e));
+      }else if(data.signal.type==="candidate"&&data.signal.candidate){
+        if(peerConn&&remoteDescSet){
+          peerConn.addIceCandidate(data.signal.candidate).catch(()=>{});
+        }else{
+          // Queue candidate until remote description is set
+          iceCandidateQueue.push(data.signal.candidate);
+        }
       }
     });
     S.socket.on("live_ended",()=>{
-      if(peerConn){peerConn.close();peerConn=null;}
-      const v=ov.querySelector("#live-video");if(v)v.srcObject=null;
+      if(peerConn){try{peerConn.close();}catch(e){}}peerConn=null;iceCandidateQueue=[];remoteDescSet=false;
+      const v=ov.querySelector("#live-video");if(v){v.srcObject=null;v.muted=true;}
+      const ub=ov.querySelector("#live-unmute-btn");if(ub)ub.style.display="none";
       ov.querySelector("#live-user-idle").style.display="flex";
       ov.querySelector("#live-user-stream").style.display="none";
       updateStatus({active:false,viewerCount:0});
@@ -767,8 +813,8 @@ function openLiveTrading(){
   S.socket.emit("live_get_status");
   // Back button cleanup
   ov.querySelector("#live-back").onclick=()=>{
-    if(!isAdmin){S.socket.emit("live_leave");if(peerConn){peerConn.close();peerConn=null;}}
-    if(isAdmin&&localStream){localStream.getTracks().forEach(tr=>tr.stop());S.socket.emit("live_stop");if(window._livePeers){Object.values(window._livePeers).forEach(pc=>pc.close());window._livePeers={};}}
+    if(!isAdmin){S.socket.emit("live_leave");if(peerConn){try{peerConn.close();}catch(e){}}peerConn=null;}
+    if(isAdmin&&localStream){localStream.getTracks().forEach(tr=>tr.stop());S.socket.emit("live_stop");if(window._livePeers){Object.values(window._livePeers).forEach(pc=>{try{pc.close();}catch(e){}});window._livePeers={};}}
     S.socket.off("live_status");S.socket.off("live_signal");S.socket.off("live_ended");S.socket.off("live_viewer_joined");
     ov.remove();
   };
