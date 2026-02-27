@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-5.1-blue?style=flat-square" alt="Version"/>
+  <img src="https://img.shields.io/badge/version-5.2-blue?style=flat-square" alt="Version"/>
   <img src="https://img.shields.io/badge/node-%3E%3D18-green?style=flat-square&logo=node.js" alt="Node"/>
   <img src="https://img.shields.io/badge/database-PostgreSQL-336791?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL"/>
   <img src="https://img.shields.io/badge/license-MIT-yellow?style=flat-square" alt="License"/>
@@ -56,8 +56,21 @@ A self-hosted, real-time messaging platform built for trading communities. Think
 - Quick symbol switcher: Forex, Crypto, Indices (EUR/USD, BTC/USD, SPX 500, etc.)
 - Timeframe selector: 1m to 1W with one-click switching
 - Full-screen and landscape modes for immersive charting
+- Analysis Notes: save personal notes per symbol with direction tags
 - Theme-synced (Galaxy Dark / Crystal Light)
 - Preferences auto-saved between sessions
+
+**Live Trading**
+- Admin screen share via WebRTC for real-time trading sessions
+- Users automatically see the live stream when entering the section
+- Live status indicator with viewer count
+- Stream timer and auto-cleanup on disconnect
+- Professional UI with idle/streaming states
+
+**Chat Actions**
+- Reply, Copy, Edit, and Delete available on all messages for all users
+- Reply quotes with sender name and message preview
+- Click reply to scroll to the original message
 
 **Payments**
 - Crypto subscriptions via NowPayments

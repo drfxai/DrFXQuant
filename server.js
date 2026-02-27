@@ -54,6 +54,9 @@ io.use((socket, next) => {
 });
 
 const onlineUsers = new Map();
+// Live Trading state
+let liveStream = { active: false, adminId: null, adminName: "", startedAt: null, viewers: new Set() };
+
 io.on("connection", (socket) => {
   const uid = socket.user.id;
   onlineUsers.set(uid, socket.id);
@@ -68,8 +71,57 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ── Live Trading Signaling ──
+  socket.on("live_start", () => {
+    if (socket.user.role !== "admin") return;
+    liveStream = { active: true, adminId: uid, adminName: socket.user.name || socket.user.email, startedAt: Date.now(), viewers: new Set() };
+    io.emit("live_status", { active: true, adminName: liveStream.adminName, startedAt: liveStream.startedAt, viewerCount: 0 });
+  });
+
+  socket.on("live_stop", () => {
+    if (socket.user.role !== "admin" || liveStream.adminId !== uid) return;
+    liveStream = { active: false, adminId: null, adminName: "", startedAt: null, viewers: new Set() };
+    io.emit("live_status", { active: false });
+    io.emit("live_ended");
+  });
+
+  socket.on("live_get_status", () => {
+    socket.emit("live_status", { active: liveStream.active, adminName: liveStream.adminName, startedAt: liveStream.startedAt, viewerCount: liveStream.viewers.size });
+  });
+
+  socket.on("live_join", () => {
+    if (!liveStream.active) return;
+    liveStream.viewers.add(uid);
+    socket.join("live_viewers");
+    io.emit("live_status", { active: true, adminName: liveStream.adminName, startedAt: liveStream.startedAt, viewerCount: liveStream.viewers.size });
+    // Ask admin to send offer to this viewer
+    const adminSock = onlineUsers.get(liveStream.adminId);
+    if (adminSock) io.to(adminSock).emit("live_viewer_joined", { viewerId: uid, socketId: socket.id });
+  });
+
+  socket.on("live_leave", () => {
+    liveStream.viewers.delete(uid);
+    socket.leave("live_viewers");
+    io.emit("live_status", { active: liveStream.active, adminName: liveStream.adminName, startedAt: liveStream.startedAt, viewerCount: liveStream.viewers.size });
+  });
+
+  // WebRTC signaling relay
+  socket.on("live_signal", (data) => {
+    if (data.to) io.to(data.to).emit("live_signal", { from: socket.id, signal: data.signal, fromUserId: uid });
+  });
+
   socket.on("disconnect", () => {
     onlineUsers.delete(uid);
+    // If admin disconnects, end live
+    if (liveStream.active && liveStream.adminId === uid) {
+      liveStream = { active: false, adminId: null, adminName: "", startedAt: null, viewers: new Set() };
+      io.emit("live_status", { active: false });
+      io.emit("live_ended");
+    }
+    liveStream.viewers.delete(uid);
+    if (liveStream.active) {
+      io.emit("live_status", { active: true, adminName: liveStream.adminName, startedAt: liveStream.startedAt, viewerCount: liveStream.viewers.size });
+    }
     io.emit("online_users", Array.from(onlineUsers.keys()));
   });
 });
@@ -81,7 +133,7 @@ app.get("*", (req, res) => res.sendFile(path.join(__dirname, "public", "index.ht
     await initDB();
     server.listen(PORT, () => {
       console.log(`\n  ╔════════════════════════════════════════╗`);
-      console.log(`  ║  📈 DrFX Quantum v5.1 on port ${PORT}       ║`);
+      console.log(`  ║  📈 DrFX Quantum v5.2 on port ${PORT}       ║`);
       console.log(`  ║  PostgreSQL ✅ · Telegram-style         ║`);
       console.log(`  ╚════════════════════════════════════════╝\n`);
     });

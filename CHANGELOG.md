@@ -1,5 +1,33 @@
 # Changelog
 
+## v5.2 — Chat Actions, Analysis Memory & Live Trading (2026-02-27)
+
+### Chat: Full Message Actions for All Users
+- Copy, Edit, Delete, and Reply now available to all users on all messages
+- Reply system with visual quote preview (sender name + snippet, click to scroll)
+- Reply bar appears above input when replying, with cancel button
+- Backend permissions updated: any chat member can edit/delete any message
+- `reply_to` column added to messages table with full migration support
+
+### Manual Trading: Analysis Memory
+- New 📝 Analysis Notes panel (side panel on desktop, full overlay on mobile)
+- Save analysis per symbol with direction (Long/Short/Neutral) and timeframe
+- Notes automatically filter by current chart symbol
+- Notes refresh when switching symbols
+- Full CRUD: create, view, delete personal trading notes
+- `trading_notes` database table with user/symbol indexing
+
+### Live Trading: Admin Screen Share
+- New 🔴 Live Trading section accessible from sidebar
+- Admin can broadcast screen via WebRTC `getDisplayMedia()`
+- Users see real-time stream with auto-connect when going live
+- Live status indicator with red pulsing dot and viewer count
+- Stream timer showing duration (MM:SS)
+- WebRTC signaling via Socket.io (offer/answer/ICE candidates)
+- Auto-cleanup: stream ends if admin disconnects or stops sharing
+- Professional UI: idle state, streaming state, responsive layout
+- STUN servers for NAT traversal (Google STUN)
+
 ## v5.1 — Manual Trading (2026-02-27)
 
 ### Manual Trading Section

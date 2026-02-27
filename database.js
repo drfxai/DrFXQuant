@@ -53,7 +53,19 @@ async function initDB() {
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         content TEXT DEFAULT '',
         image TEXT DEFAULT '',
+        reply_to INTEGER REFERENCES messages(id) ON DELETE SET NULL,
         edited_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS trading_notes (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        symbol TEXT NOT NULL DEFAULT '',
+        timeframe TEXT DEFAULT '',
+        direction TEXT DEFAULT '',
+        note TEXT DEFAULT '',
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
 
@@ -74,6 +86,7 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
       CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
       CREATE INDEX IF NOT EXISTS idx_chats_username ON chats(username);
+      CREATE INDEX IF NOT EXISTS idx_trading_notes_user ON trading_notes(user_id, symbol);
     `);
 
     // Add columns if upgrading from v4.0
@@ -81,6 +94,7 @@ async function initDB() {
       ["users", "username", "TEXT UNIQUE"],
       ["chats", "username", "TEXT UNIQUE"],
       ["messages", "edited_at", "TIMESTAMPTZ"],
+      ["messages", "reply_to", "INTEGER REFERENCES messages(id) ON DELETE SET NULL"],
     ];
     for (const [tbl, col, def] of cols) {
       await client.query(`ALTER TABLE ${tbl} ADD COLUMN IF NOT EXISTS ${col} ${def}`).catch(() => {});

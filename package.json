@@ -1,6 +1,6 @@
 {
   "name": "drfx-quantum",
-  "version": "5.1.0",
+  "version": "5.2.0",
   "description": "DrFX Quantum — Open-source, Telegram-style trading communication platform with AI assistant and crypto payments",
   "main": "server.js",
   "scripts": {

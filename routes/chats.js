@@ -190,7 +190,12 @@ router.get("/:id/messages", async (req, res) => {
     const { rows: [mem] } = await pool.query("SELECT * FROM chat_members WHERE chat_id=$1 AND user_id=$2", [chatId, req.user.id]);
     if (!mem) return res.status(403).json({ error: "Not a member" });
     const before = req.query.before ? parseInt(req.query.before) : null;
-    let q = "SELECT m.*,u.name AS sender_name,u.avatar AS sender_avatar,u.role AS sender_role FROM messages m JOIN users u ON m.user_id=u.id WHERE m.chat_id=$1";
+    let q = `SELECT m.*,u.name AS sender_name,u.avatar AS sender_avatar,u.role AS sender_role,
+      rm.content AS reply_content,rm.user_id AS reply_user_id,ru.name AS reply_sender_name
+      FROM messages m JOIN users u ON m.user_id=u.id
+      LEFT JOIN messages rm ON m.reply_to=rm.id
+      LEFT JOIN users ru ON rm.user_id=ru.id
+      WHERE m.chat_id=$1`;
     const params = [chatId];
     if (before) { q += " AND m.id<$2"; params.push(before); }
     q += " ORDER BY m.created_at DESC LIMIT 50";
@@ -204,16 +209,22 @@ router.post("/:id/messages", async (req, res) => {
   const pool = req.app.get("pool"), io = req.app.get("io");
   try {
     const chatId = parseInt(req.params.id);
-    const { content, image } = req.body;
+    const { content, image, reply_to } = req.body;
     if (!content?.trim() && !image) return res.status(400).json({ error: "Message required" });
     const { rows: [mem] } = await pool.query("SELECT cm.role AS chat_role FROM chat_members cm WHERE cm.chat_id=$1 AND cm.user_id=$2", [chatId, req.user.id]);
     if (!mem) return res.status(403).json({ error: "Not a member" });
     const { rows: [chat] } = await pool.query("SELECT type FROM chats WHERE id=$1", [chatId]);
     if (chat?.type === "channel" && mem.chat_role !== "admin" && req.user.role !== "admin") return res.status(403).json({ error: "Only admins post in channels" });
     const text = (content || "").trim().slice(0, 4000), img = (image || "").slice(0, 500);
-    const { rows: [msg] } = await pool.query("INSERT INTO messages (chat_id,user_id,content,image) VALUES ($1,$2,$3,$4) RETURNING *", [chatId, req.user.id, text, img]);
+    const replyId = reply_to ? parseInt(reply_to) : null;
+    const { rows: [msg] } = await pool.query("INSERT INTO messages (chat_id,user_id,content,image,reply_to) VALUES ($1,$2,$3,$4,$5) RETURNING *", [chatId, req.user.id, text, img, replyId]);
     const { rows: [sender] } = await pool.query("SELECT name,avatar,role FROM users WHERE id=$1", [req.user.id]);
-    const payload = { ...msg, sender_name: sender.name, sender_avatar: sender.avatar, sender_role: sender.role };
+    let replyInfo = {};
+    if (replyId) {
+      const { rows: [rm] } = await pool.query("SELECT m.content AS reply_content,m.user_id AS reply_user_id,u.name AS reply_sender_name FROM messages m JOIN users u ON m.user_id=u.id WHERE m.id=$1", [replyId]);
+      if (rm) replyInfo = rm;
+    }
+    const payload = { ...msg, sender_name: sender.name, sender_avatar: sender.avatar, sender_role: sender.role, ...replyInfo };
     const { rows: members } = await pool.query("SELECT user_id FROM chat_members WHERE chat_id=$1", [chatId]);
     members.forEach(m => io.to(`user_${m.user_id}`).emit("chat_message", payload));
     await pool.query("UPDATE chat_members SET last_read_id=$1 WHERE chat_id=$2 AND user_id=$3", [msg.id, chatId, req.user.id]);
@@ -250,14 +261,15 @@ router.post("/:id/messages", async (req, res) => {
   } catch (err) { console.error("Send:", err); res.status(500).json({ error: "Server error" }); }
 });
 
-// Edit message
+// Edit message — any chat member can edit any message
 router.put("/:chatId/messages/:msgId", async (req, res) => {
   const pool = req.app.get("pool"), io = req.app.get("io");
   try {
     const chatId = parseInt(req.params.chatId), msgId = parseInt(req.params.msgId);
+    const { rows: [mem] } = await pool.query("SELECT 1 FROM chat_members WHERE chat_id=$1 AND user_id=$2", [chatId, req.user.id]);
+    if (!mem) return res.status(403).json({ error: "Not a member" });
     const { rows: [msg] } = await pool.query("SELECT * FROM messages WHERE id=$1 AND chat_id=$2", [msgId, chatId]);
     if (!msg) return res.status(404).json({ error: "Not found" });
-    if (msg.user_id !== req.user.id && req.user.role !== "admin") return res.status(403).json({ error: "Not your message" });
     const { content } = req.body;
     const { rows: [updated] } = await pool.query("UPDATE messages SET content=$1,edited_at=NOW() WHERE id=$2 RETURNING *", [String(content).slice(0, 4000), msgId]);
     const { rows: [sender] } = await pool.query("SELECT name,avatar,role FROM users WHERE id=$1", [msg.user_id]);
@@ -268,14 +280,15 @@ router.put("/:chatId/messages/:msgId", async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
-// Delete message
+// Delete message — any chat member can delete any message
 router.delete("/:chatId/messages/:msgId", async (req, res) => {
   const pool = req.app.get("pool"), io = req.app.get("io");
   try {
     const chatId = parseInt(req.params.chatId), msgId = parseInt(req.params.msgId);
+    const { rows: [mem] } = await pool.query("SELECT 1 FROM chat_members WHERE chat_id=$1 AND user_id=$2", [chatId, req.user.id]);
+    if (!mem) return res.status(403).json({ error: "Not a member" });
     const { rows: [msg] } = await pool.query("SELECT * FROM messages WHERE id=$1 AND chat_id=$2", [msgId, chatId]);
     if (!msg) return res.status(404).json({ error: "Not found" });
-    if (msg.user_id !== req.user.id && req.user.role !== "admin") return res.status(403).json({ error: "Not your message" });
     await pool.query("DELETE FROM messages WHERE id=$1", [msgId]);
     const { rows: members } = await pool.query("SELECT user_id FROM chat_members WHERE chat_id=$1", [chatId]);
     members.forEach(m => io.to(`user_${m.user_id}`).emit("message_deleted", { id: msgId, chat_id: chatId }));
@@ -308,6 +321,44 @@ router.get("/users/search", async (req, res) => {
       "SELECT id,type,username,name,avatar,visibility,(SELECT COUNT(*)::int FROM chat_members WHERE chat_id=chats.id) AS member_count FROM chats WHERE type IN ('group','channel') AND (LOWER(name) LIKE $1 OR LOWER(username) LIKE $1) LIMIT 15", [like]
     );
     res.json({ users, chats });
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+// ── Trading Notes ──
+router.get("/trading-notes", async (req, res) => {
+  const pool = req.app.get("pool");
+  try {
+    const { rows } = await pool.query("SELECT * FROM trading_notes WHERE user_id=$1 ORDER BY updated_at DESC", [req.user.id]);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+router.get("/trading-notes/:symbol", async (req, res) => {
+  const pool = req.app.get("pool");
+  try {
+    const { rows } = await pool.query("SELECT * FROM trading_notes WHERE user_id=$1 AND symbol=$2 ORDER BY updated_at DESC", [req.user.id, req.params.symbol]);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+router.post("/trading-notes", async (req, res) => {
+  const pool = req.app.get("pool");
+  try {
+    const { symbol, timeframe, direction, note } = req.body;
+    if (!note?.trim()) return res.status(400).json({ error: "Note required" });
+    const { rows: [n] } = await pool.query(
+      "INSERT INTO trading_notes (user_id,symbol,timeframe,direction,note) VALUES ($1,$2,$3,$4,$5) RETURNING *",
+      [req.user.id, (symbol||"").slice(0,50), (timeframe||"").slice(0,10), (direction||"").slice(0,10), note.trim().slice(0,2000)]
+    );
+    res.json(n);
+  } catch (err) { res.status(500).json({ error: "Server error" }); }
+});
+
+router.delete("/trading-notes/:id", async (req, res) => {
+  const pool = req.app.get("pool");
+  try {
+    await pool.query("DELETE FROM trading_notes WHERE id=$1 AND user_id=$2", [parseInt(req.params.id), req.user.id]);
+    res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: "Server error" }); }
 });
 
