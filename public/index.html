@@ -452,6 +452,8 @@ function openManualTrading(){
     symBar.querySelectorAll("button").forEach(b=>{const a=b.dataset.sym===curSymbol;b.style.border=`1px solid ${a?accent:barBd}`;b.style.background=a?btnAct:btnBg;b.style.color=a?accent:txtCol;b.style.fontWeight=a?"700":"500";});
     intBar.querySelectorAll("button").forEach(b=>{const a=b.dataset.int===curInterval;b.style.border=`1px solid ${a?accent:barBd}`;b.style.background=a?btnAct:btnBg;b.style.color=a?accent:txtCol;b.style.fontWeight=a?"700":"500";});
   }
+  // Detect mobile
+  const isMobile=window.innerWidth<=768||("ontouchstart" in window);
   // Load TradingView
   let tvWidget=null;
   function loadChart(){
@@ -460,6 +462,7 @@ function openManualTrading(){
     if(loading)loading.style.display="flex";
     container.innerHTML="";
     const tvDiv=ce("div");tvDiv.id="tv-widget-"+Date.now();tvDiv.style.cssText="width:100%;height:100%";container.appendChild(tvDiv);
+    const curMobile=window.innerWidth<=768;
     const initWidget=()=>{
       try{if(tvWidget&&tvWidget.remove)tvWidget.remove();}catch(e){}
       tvWidget=new TradingView.widget({
@@ -473,11 +476,12 @@ function openManualTrading(){
         toolbar_bg:barBg,
         enable_publishing:false,
         allow_symbol_change:true,
-        save_image:true,
-        hide_side_toolbar:false,
-        details:true,
-        hotlist:true,
-        calendar:true,
+        save_image:!curMobile,
+        hide_side_toolbar:curMobile,
+        hide_top_toolbar:false,
+        details:!curMobile,
+        hotlist:!curMobile,
+        calendar:!curMobile,
         studies:["MASimple@tv-basicstudies","RSI@tv-basicstudies"],
         width:"100%",
         height:"100%",
@@ -507,15 +511,26 @@ function openManualTrading(){
   };
   const onFsChange=()=>{const isFs=!!(document.fullscreenElement||document.webkitFullscreenElement);fsBtn.innerHTML=isFs?"⊗":"⛶";fsBtn.title=isFs?"Exit Full Screen":"Full Screen";};
   document.addEventListener("fullscreenchange",onFsChange);document.addEventListener("webkitfullscreenchange",onFsChange);
-  // Landscape / resize — debounced reload for perfect sizing
-  let rvT;const onResize=()=>{clearTimeout(rvT);rvT=setTimeout(()=>{const container=ov.querySelector("#tv-chart");if(container&&container.parentNode)loadChart();},500);};
+  // Orientation / resize — ONLY reload when width changes (not keyboard open/close which only changes height)
+  let tvLastWidth=window.innerWidth;
+  let rvT;
+  const onResize=()=>{
+    const newW=window.innerWidth;
+    // Keyboard open/close only changes height — skip reload. Only reload on width change (orientation/window resize).
+    if(newW===tvLastWidth)return;
+    tvLastWidth=newW;
+    clearTimeout(rvT);
+    rvT=setTimeout(()=>{const container=ov.querySelector("#tv-chart");if(container&&container.parentNode)loadChart();},500);
+  };
   window.addEventListener("resize",onResize);
+  // Cleanup helper
+  const cleanup=()=>{window.removeEventListener("resize",onResize);document.removeEventListener("keydown",onKey);document.removeEventListener("fullscreenchange",onFsChange);document.removeEventListener("webkitfullscreenchange",onFsChange);};
   // Cleanup on escape
-  const onKey=(e)=>{if(e.key==="Escape"&&document.getElementById("tv-overlay")){try{if(tvWidget&&tvWidget.remove)tvWidget.remove();}catch(ex){}ov.remove();window.removeEventListener("resize",onResize);document.removeEventListener("keydown",onKey);document.removeEventListener("fullscreenchange",onFsChange);document.removeEventListener("webkitfullscreenchange",onFsChange);}};
+  const onKey=(e)=>{if(e.key==="Escape"&&document.getElementById("tv-overlay")){try{if(tvWidget&&tvWidget.remove)tvWidget.remove();}catch(ex){}ov.remove();cleanup();}};
   document.addEventListener("keydown",onKey);
   // Also cleanup when back is used
   const origBack=ov.querySelector("#tv-back").onclick;
-  ov.querySelector("#tv-back").onclick=()=>{origBack();window.removeEventListener("resize",onResize);document.removeEventListener("keydown",onKey);document.removeEventListener("fullscreenchange",onFsChange);document.removeEventListener("webkitfullscreenchange",onFsChange);};
+  ov.querySelector("#tv-back").onclick=()=>{origBack();cleanup();};
 }
 
 function openProfile(){modal("Profile",(body,close)=>{let newAv=S.user.avatar;body.innerHTML=`<div style="text-align:center;margin-bottom:16px"><div id="pp-av" style="display:inline-block;cursor:pointer;position:relative">${avatar(S.user.avatar||"🧑‍💻",72)}<div style="position:absolute;bottom:0;right:0;width:26px;height:26px;border-radius:50%;background:${t.pg};display:flex;align-items:center;justify-content:center;font-size:11px;border:2px solid ${t.mod}">${I.photo}</div></div><input id="pp-fi" type="file" accept="image/*" style="display:none"/></div><label style="color:${t.t2};font-size:11px;font-weight:600;display:block;margin-bottom:5px">Username</label><div style="position:relative"><span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:${t.t3};font-size:14px">@</span><input id="pp-u" class="gi" value="${esc(S.user.username||"")}" style="padding-left:28px;margin-bottom:10px;font-size:14px"/></div><label style="color:${t.t2};font-size:11px;font-weight:600;display:block;margin-bottom:5px">Name</label><input id="pp-n" class="gi" value="${esc(S.user.name||"")}" style="margin-bottom:10px;font-size:14px"/><label style="color:${t.t2};font-size:11px;font-weight:600;display:block;margin-bottom:5px">Bio</label><textarea id="pp-b" class="gi" rows="3" style="resize:none;margin-bottom:10px;font-size:14px" placeholder="Tell about yourself...">${esc(S.user.bio||"")}</textarea><label style="color:${t.t2};font-size:11px;font-weight:600;display:block;margin-bottom:5px">Email</label><div style="padding:10px;border-radius:12px;background:${t.cd};border:1px solid ${t.bd};color:${t.t3};font-size:13px;margin-bottom:14px">${esc(S.user.email)}</div><button id="pp-save" class="pb" style="width:100%" type="button">Save</button>`;body.querySelector("#pp-av").onclick=()=>body.querySelector("#pp-fi").click();body.querySelector("#pp-fi").onchange=async function(){if(!this.files[0])return;const fd=new FormData();fd.append("file",this.files[0]);const r=await fetch("/api/upload",{method:"POST",headers:{Authorization:"Bearer "+S.token},body:fd});const d=await r.json();if(d.url){newAv=d.url;body.querySelector("#pp-av").innerHTML=avatar(newAv,72);}};body.querySelector("#pp-save").onclick=async()=>{try{const u=await api("/auth/profile",{method:"PUT",body:JSON.stringify({name:body.querySelector("#pp-n").value.trim(),bio:body.querySelector("#pp-b").value.trim(),avatar:newAv,username:body.querySelector("#pp-u").value.trim()})});S.user={...S.user,...u};localStorage.setItem("dq_u",JSON.stringify(S.user));close();renderApp();}catch(e){alert(e.error||"Error");}};});}
