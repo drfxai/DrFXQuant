@@ -10,7 +10,7 @@ const { pool, initDB } = require("./database");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" }, maxHttpBufferSize: 10e6 });
+const io = new Server(server, { cors: { origin: "*" }, maxHttpBufferSize: 15e6 });
 
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "change_me";
@@ -71,7 +71,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ── Live Trading Signaling ──
+  // ── Live Trading — Server-relayed frame streaming ──
   socket.on("live_start", () => {
     if (socket.user.role !== "admin") return;
     liveStream = { active: true, adminId: uid, adminName: socket.user.name || socket.user.email, startedAt: Date.now(), viewers: new Set() };
@@ -82,7 +82,7 @@ io.on("connection", (socket) => {
     if (socket.user.role !== "admin" || liveStream.adminId !== uid) return;
     liveStream = { active: false, adminId: null, adminName: "", startedAt: null, viewers: new Set() };
     io.emit("live_status", { active: false });
-    io.emit("live_ended");
+    io.to("live_viewers").emit("live_ended");
   });
 
   socket.on("live_get_status", () => {
@@ -94,29 +94,28 @@ io.on("connection", (socket) => {
     liveStream.viewers.add(uid);
     socket.join("live_viewers");
     io.emit("live_status", { active: true, adminName: liveStream.adminName, startedAt: liveStream.startedAt, viewerCount: liveStream.viewers.size });
-    // Ask admin to send offer to this viewer
-    const adminSock = onlineUsers.get(liveStream.adminId);
-    if (adminSock) io.to(adminSock).emit("live_viewer_joined", { viewerId: uid, socketId: socket.id });
   });
 
   socket.on("live_leave", () => {
     liveStream.viewers.delete(uid);
     socket.leave("live_viewers");
-    io.emit("live_status", { active: liveStream.active, adminName: liveStream.adminName, startedAt: liveStream.startedAt, viewerCount: liveStream.viewers.size });
+    if (liveStream.active) {
+      io.emit("live_status", { active: liveStream.active, adminName: liveStream.adminName, startedAt: liveStream.startedAt, viewerCount: liveStream.viewers.size });
+    }
   });
 
-  // WebRTC signaling relay
-  socket.on("live_signal", (data) => {
-    if (data.to) io.to(data.to).emit("live_signal", { from: socket.id, signal: data.signal, fromUserId: uid });
+  // Admin sends captured frame → relay to all viewers
+  socket.on("live_frame", (frameData) => {
+    if (socket.user.role !== "admin" || !liveStream.active || liveStream.adminId !== uid) return;
+    socket.to("live_viewers").emit("live_frame", frameData);
   });
 
   socket.on("disconnect", () => {
     onlineUsers.delete(uid);
-    // If admin disconnects, end live
     if (liveStream.active && liveStream.adminId === uid) {
       liveStream = { active: false, adminId: null, adminName: "", startedAt: null, viewers: new Set() };
       io.emit("live_status", { active: false });
-      io.emit("live_ended");
+      io.to("live_viewers").emit("live_ended");
     }
     liveStream.viewers.delete(uid);
     if (liveStream.active) {
