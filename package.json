@@ -1,0 +1,45 @@
+{
+  "name": "drfx-quantum",
+  "version": "5.1.0",
+  "description": "DrFX Quantum — Open-source, Telegram-style trading communication platform with AI assistant and crypto payments",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/drfxai/DrFXQuant.git"
+  },
+  "keywords": [
+    "trading",
+    "chat",
+    "telegram",
+    "messenger",
+    "ai",
+    "cryptocurrency",
+    "forex",
+    "real-time",
+    "websocket",
+    "postgresql"
+  ],
+  "author": "Dr. Pouria (https://t.me/Drfxai)",
+  "license": "MIT",
+  "homepage": "https://github.com/drfxai/DrFXQuant#readme",
+  "bugs": {
+    "url": "https://github.com/drfxai/DrFXQuant/issues"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "pg": "^8.13.1",
+    "socket.io": "^4.7.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
